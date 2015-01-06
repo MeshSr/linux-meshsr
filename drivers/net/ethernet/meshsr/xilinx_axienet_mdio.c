@@ -130,6 +130,7 @@ int axienet_mdio_setup(struct axienet_local *lp, struct device_node *np)
 	int ret;
 	u32 clk_div;
 	struct mii_bus *bus;
+	struct mii_bus *nbus;
 	struct resource res;
 	struct device_node *np1;
 	/* the ethernet controller device node */
@@ -224,9 +225,12 @@ int axienet_mdio_setup(struct axienet_local *lp, struct device_node *np)
 	bus->write = axienet_mdio_write;
 	bus->parent = lp->dev;
 	bus->irq = lp->mdio_irqs; /* preallocated IRQ table */
-        if( lp->mii_bus = of_mdio_find_bus(np1) )
-	{
-		dev_info(lp->dev, "Reusing Mdio bus\n");
+
+	/* Bus Sharing with the main Holder */
+	nbus = of_mdio_find_bus(np1);
+	if (nbus) {
+		lp->mii_bus = nbus;
+		dev_info(lp->dev, "Found MDIO Bus Reused\n");
 		return 0;
 	}
 	lp->mii_bus = bus;

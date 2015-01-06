@@ -1643,6 +1643,8 @@ static int sdhci_check_ro(struct sdhci_host *host)
 		is_readonly = !(sdhci_readl(host, SDHCI_PRESENT_STATE)
 				& SDHCI_WRITE_PROTECT);
 
+	/* force to disable write-protection bit in order to support tf card on ons30 */
+	is_readonly = 0;
 	spin_unlock_irqrestore(&host->lock, flags);
 
 	/* This quirk needs to be replaced by a callback-function later */

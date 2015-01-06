@@ -47,10 +47,11 @@
 
 #define AXIENET_REGS_N		32
 
+#define PCS_PMA_PHY_ID		5
+
 /* Match table for of_platform binding */
 static struct of_device_id axienet_of_match[] = {
-	{ .compatible = "xlnx,axi-ethernet-broadcom-1.00.a", },
-	{ .compatible = "xlnx,axi-ethernet-marvell-1.00.a", },
+	{ .compatible = "xlnx,axi-ethernet-1.00.a", },
 	{ .compatible = "xlnx,axi-ethernet-1.01.a", },
 	{ .compatible = "xlnx,axi-ethernet-2.01.a", },
 	{},
@@ -167,15 +168,16 @@ static void axienet_dma_bd_release(struct net_device *ndev)
 {
 	int i;
 	struct axienet_local *lp = netdev_priv(ndev);
-        if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
+
+	if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
 		//meshsr: DMA Holder do the rest, and else do nothing.
 		u32 dma_channel_number;
-		of_property_read_u32( lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
-		if( dma_channel_number != 0 )
-		{
+		of_property_read_u32(lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
+		if (dma_channel_number != 0) {
 			return;
 		}
-        }
+	}
+
 	for (i = 0; i < RX_BD_NUM; i++) {
 		dma_unmap_single(ndev->dev.parent, lp->rx_bd_v[i].phys,
 				 lp->max_frm_size, DMA_FROM_DEVICE);
@@ -219,15 +221,16 @@ static int axienet_dma_bd_init(struct net_device *ndev)
 	lp->tx_bd_ci = 0;
 	lp->tx_bd_tail = 0;
 	lp->rx_bd_ci = 0;
-        if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
+	
+	if ( NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
 		//meshsr: DMA Holder do the rest, and else do nothing.
 		u32 dma_channel_number;
-		of_property_read_u32( lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
-		if( dma_channel_number != 0 )
-		{
+		of_property_read_u32(lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
+		if (dma_channel_number != 0) {
 			return 0;
 		}
-         }
+	}
+
 	/*
 	 * Allocate the Tx and Rx buffer descriptors.
 	 */
@@ -500,24 +503,23 @@ static void axienet_device_reset(struct net_device *ndev)
 {
 	u32 axienet_status;
 	struct axienet_local *lp = netdev_priv(ndev);
-        if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
+	
+	if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
 		//meshsr patch here
 		u32 dma_channel_number;
-		of_property_read_u32( lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
-		if( dma_channel_number == 0)
-		{
+		of_property_read_u32(lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
+		if (dma_channel_number == 0) {
 			//DMA holder
 			__axienet_device_reset(lp, &ndev->dev, XAXIDMA_TX_CR_OFFSET);
 			__axienet_device_reset(lp, &ndev->dev, XAXIDMA_RX_CR_OFFSET);
-		}
-		else
-		{
+		} else {
 			//Do nothing
 		}
-        }else{
-                __axienet_device_reset(lp, &ndev->dev, XAXIDMA_TX_CR_OFFSET);
+	} else {
+		__axienet_device_reset(lp, &ndev->dev, XAXIDMA_TX_CR_OFFSET);
 	 	__axienet_device_reset(lp, &ndev->dev, XAXIDMA_RX_CR_OFFSET);
-        }
+	}
+
 	lp->max_frm_size = XAE_MAX_VLAN_FRAME_SIZE;
 	lp->options |= XAE_OPTION_VLAN;
 	lp->options &= (~XAE_OPTION_JUMBO);
@@ -638,24 +640,25 @@ static void axienet_start_xmit_done(struct net_device *ndev)
 	int dma_channel_number;
 	cur_p = &lp->tx_bd_v[lp->tx_bd_ci];
 	status = cur_p->status;
-	if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
+
+	if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
 		//meshsr patch: support packet/byte send counter
-		
-		dma_channel_number = ((cur_p->app0)>>16)&0x0000FFFF;
-		//dev_err(lp->dev, "DMA DONE: Channel0x%x, APP0 0x%x\n", dma_channel_number, cur_p->app0);
-        } 
+		dma_channel_number = ((cur_p->app0) >> 16) & 0x0000FFFF;
+	}
+
 	while (status & XAXIDMA_BD_STS_COMPLETE_MASK) {
 		dma_unmap_single(ndev->dev.parent, cur_p->phys,
 				(cur_p->cntrl & XAXIDMA_BD_CTRL_LENGTH_MASK),
 				DMA_TO_DEVICE);
 		if (cur_p->app4)
 			dev_kfree_skb_irq((struct sk_buff *)cur_p->app4);
-                if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
 
-		        //meshsr check point
-			if( dma_channel_number != ((cur_p->app0)>>16) )
-				dev_err(lp->dev, "Channel Not Equal: Channel0x%x, Expected 0x%x\n", (cur_p->app0)>>16, dma_channel_number);
-                }
+		if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
+			//meshsr check point
+			if (dma_channel_number != ((cur_p->app0) >> 16))
+				dev_err(lp->dev, "Channel Not Equal: Channel0x%x, Expected 0x%x\n", (cur_p->app0) >> 16, dma_channel_number);
+		}
+
 		/*cur_p->phys = 0;*/
 		cur_p->app0 = 0;
 		cur_p->app1 = 0;
@@ -671,11 +674,12 @@ static void axienet_start_xmit_done(struct net_device *ndev)
 		cur_p = &lp->tx_bd_v[lp->tx_bd_ci];
 		status = cur_p->status;
 	}
-	if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
-        
+
+	if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
 		//meshsr patch: here should tell system, there are more space
 		ndev = local_ndev_list[dma_channel_number];
-        }
+	}
+
 	ndev->stats.tx_packets += packets;
 	ndev->stats.tx_bytes += size;
 	netif_wake_queue(ndev);
@@ -728,17 +732,16 @@ static int axienet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	struct axienet_local *lp = netdev_priv(ndev);
 	struct axidma_bd *cur_p;
 	int dma_channel_number;
-        if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
+	
+	if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
 		//meshsr patch: use main dma channel to transfer
-		
-		of_property_read_u32( lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
-		if(dma_channel_number != 0)
-		{
+		of_property_read_u32(lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
+		if (dma_channel_number != 0) {
 			//sub dma channel,
 			lp = local_lp[0];
 		}
-		//dev_err(lp->dev, "DMA START! Channel 0x%x start a transfer\n", dma_channel_number);
-        }
+	}
+
 	num_frag = skb_shinfo(skb)->nr_frags;
 	cur_p = &lp->tx_bd_v[lp->tx_bd_tail];
 
@@ -762,11 +765,11 @@ static int axienet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	} else if (skb->ip_summed == CHECKSUM_UNNECESSARY) {
 		cur_p->app0 |= 2; /* Tx Full Checksum Offload Enabled */
 	}
-        if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL))
-        {
+	
+	if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
 		//meshsr patch add channel support
-		cur_p->app0 |= (dma_channel_number<<16);
-        }
+		cur_p->app0 |= (dma_channel_number << 16);
+	}
 
 	cur_p->cntrl = skb_headlen(skb) | XAXIDMA_BD_CTRL_TXSOF_MASK;
 	cur_p->phys = dma_map_single(ndev->dev.parent, skb->data,
@@ -821,14 +824,13 @@ static void axienet_recv(struct net_device *ndev)
 	struct net_device *channel_ndev;
 	rmb();
 	cur_p = &lp->rx_bd_v[lp->rx_bd_ci];
-	if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL))
-	{
 
+	if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
 		//meshsr patch: add channel support
-		
-		dma_channel_number = ((cur_p->app0)>>16)&0xFFFF;
+		dma_channel_number = ((cur_p->app0) >> 16) & 0xFFFF;
 		channel_ndev = local_ndev_list[dma_channel_number];
- 	}
+	}
+
 	while ((cur_p->status & XAXIDMA_BD_STS_COMPLETE_MASK)) {
 		tail_p = lp->rx_bd_p + sizeof(*lp->rx_bd_v) * lp->rx_bd_ci;
 		skb = (struct sk_buff *) (cur_p->sw_id_offset);
@@ -839,19 +841,16 @@ static void axienet_recv(struct net_device *ndev)
 				 DMA_FROM_DEVICE);
 
 		skb_put(skb, length);
-            	if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
 
+		if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
 			//meshsr patch
-			dma_channel_number = ((cur_p->app0)>>16)&0xFFFF;
-			//dev_err(lp->dev, "DMA Multi Channel Number =0x%x Recv\n", dma_channel_number);
+			dma_channel_number = ((cur_p->app0) >> 16) & 0xFFFF;
 			channel_ndev = local_ndev_list[dma_channel_number];
-			if( dma_channel_number == 0)
+			if (dma_channel_number == 0)
 				skb->protocol = eth_type_trans(skb, ndev);
 			else
 				skb->protocol = eth_type_trans(skb, channel_ndev);
-                }
-		else
-		{
+		} else {
       			skb->protocol = eth_type_trans(skb, ndev);
 		}
 
@@ -874,23 +873,21 @@ static void axienet_recv(struct net_device *ndev)
 		}
 
 		netif_rx(skb);
-                if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
-			//meshsr patch			
-			if( dma_channel_number == 0)
-			{
+		
+		if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
+			//meshsr patch
+			if (dma_channel_number == 0){
 				ndev->stats.rx_packets += 1;
 				ndev->stats.rx_bytes += length;
-			}
-			else
-			{
+			} else {
 				channel_ndev->stats.rx_packets += 1;
 				channel_ndev->stats.rx_bytes += length;
 			}
- 		}
-		else{
+ 		} else {
 			size += length;
 			packets++;
-                }
+		}
+
 		new_skb = netdev_alloc_skb_ip_align(ndev, lp->max_frm_size);
 		if (!new_skb)
 			return;
@@ -906,13 +903,14 @@ static void axienet_recv(struct net_device *ndev)
 		lp->rx_bd_ci %= RX_BD_NUM;
 		cur_p = &lp->rx_bd_v[lp->rx_bd_ci];
 	}
-	if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL))
-	{
-	}
-	else{
+
+	if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
+		//do nothing
+	} else {
 		ndev->stats.rx_packets += packets;
 		ndev->stats.rx_bytes += size;
 	}
+
 	if (tail_p)
 		axienet_dma_out32(lp, XAXIDMA_RX_TDESC_OFFSET, tail_p);
 }
@@ -1037,11 +1035,12 @@ static int axienet_open(struct net_device *ndev)
 	u32 dma_channel_number;
 
 	dev_dbg(&ndev->dev, "axienet_open()\n");
-
+	/* Only MDIO Bus Holder need to Disable and Enable MDIO when reseting */
 	mdio_mcreg = axienet_ior(lp, XAE_MDIO_MC_OFFSET);
 	ret = axienet_mdio_wait_until_ready(lp);
 	if (ret < 0)
-		return ret;
+			return ret;
+
 	/* Disable the MDIO interface till Axi Ethernet Reset is completed.
 	 * When we do an Axi Ethernet reset, it resets the complete core
 	 * including the MDIO. If MDIO is not disabled when the reset
@@ -1049,6 +1048,7 @@ static int axienet_open(struct net_device *ndev)
 	 */
 	axienet_iow(lp, XAE_MDIO_MC_OFFSET,
 		    (mdio_mcreg & (~XAE_MDIO_MC_MDIOEN_MASK)));
+
 	axienet_device_reset(ndev);
 	/* Enable the MDIO */
 	axienet_iow(lp, XAE_MDIO_MC_OFFSET, mdio_mcreg);
@@ -1065,6 +1065,29 @@ static int axienet_open(struct net_device *ndev)
 			lp->phy_dev = of_phy_connect(lp->ndev, lp->phy_node,
 					     axienet_adjust_link, 0,
 					     PHY_INTERFACE_MODE_RGMII_ID);
+		} else if (lp->phy_type == XAE_PHY_TYPE_SGMII) {
+			/* Enable AXIENET PCS/PMA, Isolate = 0 */
+			axienet_iow(lp, XAE_MDIO_MC_OFFSET, 0x00000050);
+			ret = axienet_mdio_wait_until_ready(lp);
+			if (ret < 0)
+				printk(KERN_ERR ">>>>>>>>PCS/PMA CONFIGURE ERROR\n");
+
+			axienet_iow(lp, XAE_MDIO_MWD_OFFSET, 0x00001140);
+			axienet_iow(lp, XAE_MDIO_MCR_OFFSET,
+				    (((PCS_PMA_PHY_ID << XAE_MDIO_MCR_PHYAD_SHIFT) &
+					XAE_MDIO_MCR_PHYAD_MASK) |
+					((0 << XAE_MDIO_MCR_REGAD_SHIFT) &
+					XAE_MDIO_MCR_REGAD_MASK) |
+					XAE_MDIO_MCR_INITIATE_MASK |
+					XAE_MDIO_MCR_OP_WRITE_MASK));
+
+			ret = axienet_mdio_wait_until_ready(lp);
+			if (ret < 0)
+				printk(KERN_ERR ">>>>>>>>PCS/PMA CONFIGURE ERROR\n");
+
+			lp->phy_dev = of_phy_connect(lp->ndev, lp->phy_node,
+					     axienet_adjust_link, 0,
+               		     PHY_INTERFACE_MODE_SGMII);
 		}
 
 		if (!lp->phy_dev)
@@ -1072,12 +1095,11 @@ static int axienet_open(struct net_device *ndev)
 		else
 			phy_start(lp->phy_dev);
 	}
-	if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
+
+	if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
 		// meshsr patch, 
-		of_property_read_u32( lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
-		//dev_err(lp->dev, "DMA Multi Channel Number =0x%x\n", dma_channel_number);
-		if(dma_channel_number == 0)
-		{
+		of_property_read_u32(lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
+		if(dma_channel_number == 0) {
 			//DMA holder will be able to setup the dma
 			/* Enable tasklets for Axi DMA error handling */
 			tasklet_init(&lp->dma_err_tasklet, axienet_dma_err_handler,
@@ -1091,13 +1113,11 @@ static int axienet_open(struct net_device *ndev)
 			ret = request_irq(lp->rx_irq, axienet_rx_irq, 0, ndev->name, ndev);
 			if (ret)
 				goto err_rx_irq;
-		}
-		else
-		{
+		} else {
 			//Other user will only receive some information
 		}
 	
-	}else{
+	} else {
  		//DMA holder will be able to setup the dma
 		/* Enable tasklets for Axi DMA error handling */
 		tasklet_init(&lp->dma_err_tasklet, axienet_dma_err_handler,
@@ -1111,7 +1131,7 @@ static int axienet_open(struct net_device *ndev)
 		ret = request_irq(lp->rx_irq, axienet_rx_irq, 0, ndev->name, ndev);
 		if (ret)
 			goto err_rx_irq;
- 	}
+	}
 	return 0;
 
 err_rx_irq:
@@ -1140,14 +1160,12 @@ static int axienet_stop(struct net_device *ndev)
 	u32 cr;
 	struct axienet_local *lp = netdev_priv(ndev);
 	u32 dma_channel_number;
-	dev_dbg(&ndev->dev, "axienet_close()\n");
-	if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
 
+	dev_dbg(&ndev->dev, "axienet_close()\n");
+	if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
 		// meshsr patch, 
-		of_property_read_u32( lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
-		//dev_err(lp->dev, "DMA Multi Channel Number =0x%x\n", dma_channel_number);
-		if(dma_channel_number == 0)
-		{
+		of_property_read_u32(lp->dev->of_node, "meshsr,dma_channel", &dma_channel_number);
+		if (dma_channel_number == 0) {
 			//DMA holder
 			cr = axienet_dma_in32(lp, XAXIDMA_RX_CR_OFFSET);
 			axienet_dma_out32(lp, XAXIDMA_RX_CR_OFFSET,
@@ -1162,12 +1180,10 @@ static int axienet_stop(struct net_device *ndev)
 
 			free_irq(lp->tx_irq, ndev);
 			free_irq(lp->rx_irq, ndev);
-		}
-		else
-		{
+		} else {
 			//DMA shared channel will do nothing
 		}
-	}else{
+	} else {
 		//DMA holder
 		cr = axienet_dma_in32(lp, XAXIDMA_RX_CR_OFFSET);
 		axienet_dma_out32(lp, XAXIDMA_RX_CR_OFFSET,
@@ -1183,9 +1199,31 @@ static int axienet_stop(struct net_device *ndev)
 		free_irq(lp->tx_irq, ndev);
 		free_irq(lp->rx_irq, ndev);
 	}
+
 	if (lp->phy_dev)
 		phy_disconnect(lp->phy_dev);
 	lp->phy_dev = NULL;
+
+	if (lp->phy_type == XAE_PHY_TYPE_SGMII) {
+		/* Enable AXIENET PCS/PMA, Isolate = 0 */
+		axienet_iow(lp, XAE_MDIO_MC_OFFSET, 0x00000050);
+		cr = axienet_mdio_wait_until_ready(lp);
+		if (cr < 0)
+			printk(KERN_ERR ">>>>>>>>PCS/PMA CONFIGURE ERROR\n");
+
+		axienet_iow(lp, XAE_MDIO_MWD_OFFSET, 0x00001540);
+		axienet_iow(lp, XAE_MDIO_MCR_OFFSET,
+				(((PCS_PMA_PHY_ID << XAE_MDIO_MCR_PHYAD_SHIFT) &
+				XAE_MDIO_MCR_PHYAD_MASK) |
+				((0 << XAE_MDIO_MCR_REGAD_SHIFT) &
+				XAE_MDIO_MCR_REGAD_MASK) |
+				XAE_MDIO_MCR_INITIATE_MASK |
+				XAE_MDIO_MCR_OP_WRITE_MASK));
+
+		cr = axienet_mdio_wait_until_ready(lp);
+		if (cr < 0)
+			printk(KERN_ERR ">>>>>>>>PCS/PMA CONFIGURE ERROR\n");
+	}
 
 	axienet_dma_bd_release(ndev);
 	return 0;
@@ -1747,6 +1785,7 @@ static int axienet_probe(struct platform_device *pdev)
 			lp->csum_offload_on_tx_path = XAE_NO_CSUM_OFFLOAD;
 		}
 	}
+
 	ret = of_property_read_u32(pdev->dev.of_node, "xlnx,rxcsum", &value);
 	if (!ret) {
 		dev_info(&pdev->dev, "RX_CSUM %d\n", value);
@@ -1776,13 +1815,11 @@ static int axienet_probe(struct platform_device *pdev)
 	of_property_read_u32(pdev->dev.of_node, "xlnx,temac-type",
 					&lp->temac_type);
 	of_property_read_u32(pdev->dev.of_node, "xlnx,phy-type", &lp->phy_type);
-	
-        //meshsr patch
-        if(NULL!= of_find_property(lp->dev->of_node,"meshsr,dma_channel",NULL)){
-         
-		of_property_read_u32( pdev->dev.of_node, "meshsr,dma_channel", &dma_channel_number);
-		if(dma_channel_number == 0)
-		{
+
+	//meshsr patch
+	if (NULL != of_find_property(lp->dev->of_node, "meshsr,dma_channel", NULL)) {
+		of_property_read_u32(pdev->dev.of_node, "meshsr,dma_channel", &dma_channel_number);
+		if (dma_channel_number == 0) {
 			// main channel hold the DMA
 			/* Find the DMA node, map the DMA registers, and decode the DMA IRQs */
 			np = of_parse_phandle(pdev->dev.of_node, "axistream-connected", 0);
@@ -1812,9 +1849,7 @@ static int axienet_probe(struct platform_device *pdev)
 			}
 			local_np[0] = np;
 			local_lp[0] = lp;
-		}
-		else
-		{
+		} else {
 			// sub channel use the channel only
 			// don't know what to do
 			np = local_np[0];
@@ -1825,9 +1860,8 @@ static int axienet_probe(struct platform_device *pdev)
 		}
 		dev_info(&pdev->dev, "DMA Multi Channel Number =0x%x Done\n", dma_channel_number);
 		local_ndev_list[dma_channel_number] = ndev;
-
-        }else{
-                np = of_parse_phandle(pdev->dev.of_node, "axistream-connected", 0);
+	} else {
+		np = of_parse_phandle(pdev->dev.of_node, "axistream-connected", 0);
 		if (IS_ERR(np)) {
 			dev_err(&pdev->dev, "could not find DMA node\n");
 			ret = PTR_ERR(np);
@@ -1851,8 +1885,8 @@ static int axienet_probe(struct platform_device *pdev)
 			dev_err(&pdev->dev, "could not determine irqs\n");
 			ret = -ENOMEM;
 			goto free_netdev;
-		}   
-        }
+		}
+	}
 
 	/* Retrieve the MAC address */
 	ret = of_property_read_u8_array(pdev->dev.of_node,
@@ -1872,13 +1906,15 @@ static int axienet_probe(struct platform_device *pdev)
 		if (ret)
 			dev_warn(&pdev->dev, "error registering MDIO bus\n");
 	}
-	/*by meshsr*/     
-        of_property_read_u32(lp->phy_node, "reg", &addr);   
-        name=of_find_property(lp->phy_node,"compatible",NULL);               	
-        if(strcmp(name->value,"marvell,88e1111")==0||strcmp(name->value, "Broadcom,bcm5464")==0)
-	{     		 		                     
-                    lp->mii_bus->write(lp->mii_bus,addr,0x18,0xf1e7);                                       		   		
-        }
+
+	/*by meshsr*/
+	of_property_read_u32(lp->phy_node, "reg", &addr);
+	name = of_find_property(lp->phy_node, "compatible", NULL);
+	if (strcmp(name->value, "marvell,88e1111") == 0 ||
+		strcmp(name->value, "Broadcom,bcm5464") == 0) {
+			lp->mii_bus->write(lp->mii_bus, addr, 0x18, 0xf1e7);
+	}
+
 	ret = register_netdev(lp->ndev);
 	if (ret) {
 		dev_err(lp->dev, "register_netdev() error (%i)\n", ret);
