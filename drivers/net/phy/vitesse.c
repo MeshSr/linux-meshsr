@@ -157,6 +157,13 @@ static int vsc824x_config_init(struct phy_device *phydev)
 
 		err &= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS,
                 MII_VSC8574_EXT_MAIN);
+
+		/* write Reg29, select LED mode value=0x800a */
+		err &= phy_write(phydev, 29,
+						0x800a);
+		/* write Reg30, select LED behavior value=0x040f */
+		err &= phy_write(phydev, 30,
+						0x040f);
     }
 	return err;
 }

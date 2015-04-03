@@ -56,6 +56,7 @@
 
 #define MII_M1111_PHY_LED_CONTROL	0x18
 #define MII_M1111_PHY_LED_DIRECT	0x4100
+#define MII_M1111_PHY_LED_FLASH 	0x4341
 #define MII_M1111_PHY_LED_COMBINE	0x411c
 #define MII_M1111_PHY_EXT_CR		0x14
 #define MII_M1111_RX_DELAY		0x80
@@ -186,7 +187,7 @@ static int marvell_config_aneg(struct phy_device *phydev)
 		return err;
 
 	err = phy_write(phydev, MII_M1111_PHY_LED_CONTROL,
-			MII_M1111_PHY_LED_DIRECT);
+			MII_M1111_PHY_LED_FLASH);
 	if (err < 0)
 		return err;
 
