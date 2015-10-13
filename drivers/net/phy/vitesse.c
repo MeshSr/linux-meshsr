@@ -62,12 +62,16 @@
 
 /* Vitesse Extended Page Access Register */
 #define MII_VSC82X4_EXT_PAGE_ACCESS	0x1f
-#define MII_VSC8574_EXT_MAIN       0x00
-#define MII_VSC8574_EXT_1          0x01
-#define MII_VSC8574_EXT_2	       0x02
-#define MII_VSC8574_EXT_3	       0x03
-#define MII_VSC8574_EXT_GENERAL	   0x10
-
+#define MII_VSC8574_EXT_MAIN  	0x0000
+#define MII_VSC8574_EXT_1      	0x0001
+#define MII_VSC8574_EXT_2	      0x0002
+#define MII_VSC8574_EXT_3	      0x0003
+#define MII_VSC8574_EXT_GENERAL 0x0010
+#define MII_VSC8574_EXT_TEST		0x2A30
+#define MII_VSC8574_EXT_TR			0x52B5
+#define MII_VSC8574_EXT_1588		0x1588
+#define MII_VSC8574_EXT_MACSEC	0x0004
+#define MII_VSC8574_EXT_2DAF		0x2DAF
 
 #define PHY_ID_VSC8234			0x000fc620
 #define PHY_ID_VSC8244			0x000fc6c0
@@ -76,6 +80,10 @@
 #define PHY_ID_VSC8662			0x00070660
 #define PHY_ID_VSC8221			0x000fc550
 #define PHY_ID_VSC8211			0x000fc4b0
+
+#define PHY_ID_VSC8574_REV_A			0x000704a0
+#define PHY_ID_VSC8574_REV_B			0x000704a1
+#define PHY_ID_VSC8574_MASK       0x000ffff1
 
 MODULE_DESCRIPTION("Vitesse PHY driver");
 MODULE_AUTHOR("Kriston Carson");
@@ -102,69 +110,196 @@ static int vsc824x_add_skew(struct phy_device *phydev)
 	return err;
 }
 
+static int vsc8574_startup_cfg(struct phy_device *phydev)
+{
+	/*
+		VSC8574 datasheet Ch. "Configuration" - SGMII copper
+		Assume that COMA_MODE is tied to ground.
+		This config seq should be placed after applying PHY_API from the vendor.
+	*/
+
+	int err = 0;
+	// mdelay(120); // "Wait 120ms minimum after the release of the reset"
+
+
+	/* Access General Page */
+	err |= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, MII_VSC8574_EXT_GENERAL);
+	/* write 19G 15:14=00, this is ignored since it is the default value */
+	/* write 18G = 0x80F0, configure for all 4x PHY SGMII */
+	/*
+		this configuration applis for all 4x PHY SGMII while every PHY is introduced.
+		would not interrupt other PHY ports since it is fixed when the first one is introduced.
+	*/
+	while(1){
+		if(phy_read(phydev, 18) & 0x8000) mdelay(1); // wait until not busy
+		else break;
+		// miss timeout scheme here
+		// printk(KERN_ERR "Hongbo: vsc8574_startup 18G is busy - before cfg.\n");
+	}
+	err |= phy_write(phydev, 18, 0x80F0);
+	while(1){
+		//mdelay(25); // command may take up to 25ms to complete according to the DS.
+		mdelay(40); // 25ms is not enough, try more.
+		if(phy_read(phydev, 18) == 0x00F0) break; // wait until not busy
+		// miss timeout scheme here
+		// printk(KERN_ERR "Hongbo: vsc8574_startup 18G is busy - after cfg.\n");
+	}
+
+	/* Access Main Page */
+	err |= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, MII_VSC8574_EXT_MAIN);
+	/* write 23M 10:8=000 12=0, this is ignored since it is the default value */
+	/* write 0M, software reset PHY to apply initial SGMII Configure */
+	err |= phy_write(phydev, 0, 0x9140);
+	while(1){
+		if(phy_read(phydev, 0) & 0x8000) mdelay(1);
+		else break;
+		// miss timeout scheme here
+		// printk(KERN_ERR "Hongbo: vsc8574_startup 0M is busy - resetting.\n");
+	}
+
+	/* write 16E3, bit 7 =1, for SGMII autonegotiation */
+	err |= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, MII_VSC8574_EXT_3);
+	err |= phy_write(phydev, 16, 0x0180);
+
+	/* Full Dumplex, Reg 0.bit8 = 1 */
+	err |= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, MII_VSC8574_EXT_MAIN);
+	err |= phy_write(phydev, 0, 0x1140);
+
+	return err;
+}
+
+static int vsc8574_config_init(struct phy_device *phydev)
+{
+	int err = 0;
+
+	if (phydev->interface == PHY_INTERFACE_MODE_SGMII)
+		err = vsc8574_startup_cfg(phydev);
+	else // this is NOT an error
+		printk(KERN_ERR "Hongbo: vsc8574_config_init PHY is not in SGMII mode\n");
+
+	return err;
+}
+
+static int vsc8574_led_mode(struct phy_device *phydev)
+{
+	int err = 0;
+
+	err |= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, MII_VSC8574_EXT_MAIN);
+	/* write Reg29, select LED mode value=0x800a */
+	err |= phy_write(phydev, 29, 0x800a);
+	/* write Reg30, select LED behavior value=0x040f */
+	err |= phy_write(phydev, 30, 0x040f);
+
+	return err;
+}
+
+static int vsc8574_reva_tune(struct phy_device *phydev)
+{
+	int err = 0;
+	// printk(KERN_ERR "Hongbo: enter in vsc8574_reva_tune\n");
+
+	// hongbo: tuning for Rev A VSC8574
+	// TODO: 8051 patch from tesla_revA_8051_patch_9_27_2011
+	/* ****** for rev A. ****** */
+	err |= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, MII_VSC8574_EXT_MAIN);
+	/* turn on broadcast writes */
+	err |= phy_write(phydev, 22, 0x3201); //VTSS_PHY_EXTENDED_CONTROL_AND_STATUS
+	/* Set 100BASE-TX edge rate to optimal setting */
+	err |= phy_write(phydev, 24, 0x2040); //VTSS_PHY_EXTENDED_PHY_CONTROL_2
+
+	err |= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, MII_VSC8574_EXT_2);
+	/* Set 100BASE-TX amplitude to optimal setting after MDI-cal tweak */
+	err |= phy_write(phydev, 16, 0x02f0); //VTSS_PHY_CU_PMD_TX_CTRL
+
+	err |= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, MII_VSC8574_EXT_TEST);
+	err |= phy_write(phydev, 20, 0x0140); //VTSS_PHY_TEST_PAGE_20
+	err |= phy_write(phydev, 9, 0x180c); //VTSS_PHY_TEST_PAGE_9
+	err |= phy_write(phydev, 8, 0x8012); //VTSS_PHY_TEST_PAGE_8
+
+	err |= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, MII_VSC8574_EXT_TR);
+	/* Write eee_TrKp*_1000 */
+	err |= phy_write(phydev, 18, 0x0000);
+	err |= phy_write(phydev, 17, 0x0011);
+	err |= phy_write(phydev, 16, 0x96a0);
+
+	/* Write eee_TrKf1000,ph_shift_num1000_* */
+	err |= phy_write(phydev, 18, 0x0000);
+	err |= phy_write(phydev, 17, 0x7100);
+	err |= phy_write(phydev, 16, 0x96a2);
+
+	/* Write SSTrK*,SS[EN]cUpdGain1000 */
+	err |= phy_write(phydev, 18, 0x00d2);
+	err |= phy_write(phydev, 17, 0x547f);
+	err |= phy_write(phydev, 16, 0x968c);
+
+	/* Write eee_TrKp*_100 */
+	err |= phy_write(phydev, 18, 0x00f0);
+	err |= phy_write(phydev, 17, 0xf00d);
+	err |= phy_write(phydev, 16, 0x96b0);
+
+	/* Write eee_TrKf100,ph_shift_num100_* */
+	err |= phy_write(phydev, 18, 0x0000);
+	err |= phy_write(phydev, 17, 0x7100);
+	err |= phy_write(phydev, 16, 0x96b2);
+
+	/* Write lpi_tr_tmr_val* */
+	err |= phy_write(phydev, 18, 0x0000);
+	err |= phy_write(phydev, 17, 0x345f);
+	err |= phy_write(phydev, 16, 0x96b4);
+
+	/* Write non/zero_det_thr*1000 */
+	err |= phy_write(phydev, 18, 0x0000);
+	err |= phy_write(phydev, 17, 0xf7df);
+	err |= phy_write(phydev, 16, 0x8fd4);
+
+	/* Write non/zero_det_thr*100 */
+	err |= phy_write(phydev, 18, 0x0000);
+	err |= phy_write(phydev, 17, 0xf3df);
+	err |= phy_write(phydev, 16, 0x8fd2);
+
+	/* Write DSPreadyTime100,LongVgaThresh100,EnabRandUpdTrig,CMAforces */
+	err |= phy_write(phydev, 18, 0x000e);
+	err |= phy_write(phydev, 17, 0x2b00);
+	err |= phy_write(phydev, 16, 0x8fb0);
+
+	/* Write SwitchToLD10,PwrUpBoth*,dac10_keepalive_en,ld10_pwrlvl_* */
+	err |= phy_write(phydev, 18, 0x000b);
+	err |= phy_write(phydev, 17, 0x05a0);
+	err |= phy_write(phydev, 16, 0x8fe0);
+
+	/* Write ld10_edge_ctrl* */
+	err |= phy_write(phydev, 18, 0x0000);
+	err |= phy_write(phydev, 17, 0x00ba);
+	err |= phy_write(phydev, 16, 0x8fe2);
+
+	/* Write register containing VgaGain10 */
+	err |= phy_write(phydev, 18, 0x0000);
+	err |= phy_write(phydev, 17, 0x4689);
+	err |= phy_write(phydev, 16, 0x8f92);
+
+	/* Improve 100BASE-TX link startup robustness to address interop issue */
+	err |= phy_write(phydev, 18, 0x0060);
+	err |= phy_write(phydev, 17, 0x0980);
+	err |= phy_write(phydev, 16, 0x8f90);
+
+	err |= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, MII_VSC8574_EXT_TEST);
+	/* Disable token-ring after complete */
+	err |= phy_write(phydev, 8, 0x0012);
+
+	err |= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS, MII_VSC8574_EXT_MAIN);
+	/* Turn off broadcast writes */
+	err |= phy_write(phydev, 22, 0x3200); //VTSS_PHY_EXTENDED_CONTROL_AND_STATUS
+
+	return err;
+}
+
 static int vsc824x_config_init(struct phy_device *phydev)
 {
-	int err;
-	unsigned int reg;
+	int err = 0;
 
 	if (phydev->interface == PHY_INTERFACE_MODE_RGMII_ID)
 		err = vsc824x_add_skew(phydev);
-    
-	if (phydev->interface == PHY_INTERFACE_MODE_SGMII) {
-		udelay(120);
 
-		/* Access General Page */
-		err = phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS,
-						MII_VSC8574_EXT_GENERAL);
-		/* write 18G = 0x80F0,  4 PHY SGMII */
-		reg = phy_read(phydev, 18);
-		if (reg != 0x00F0) {
-			err &= phy_write(phydev, 18,
-							0x80F0);
-			reg =0;
-			while (phy_read(phydev, 18) & 0x8000) {
-				udelay(1);
-				if (reg > 25000)
-					return -reg;
-			reg++;
-			}
-		}
-
-		/* Reset PHY to apply initial SGMII Configure */
-		err = phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS,
-						MII_VSC8574_EXT_MAIN);
-		err &= phy_write(phydev, 0,
-						0x9140);
-		reg = 0;
-		while (phy_read(phydev, 0) & 0x8000) {
-			udelay(1);
-			if (reg > 25000)
-				return -reg;
-			reg++;
-		}
-
-		/* write 16E3, bit 7 =1, for SGMII autonegotiation */
-		err = phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS,
-						MII_VSC8574_EXT_3);
-		err &= phy_write(phydev, 16,
-						0x0180);
-
-		/* Full Dumplex, Reg 0.bit8 = 1 */
-		err &= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS,
-						MII_VSC8574_EXT_MAIN);
-		err &= phy_write(phydev, 0,
-						0x1140);
-
-		err &= phy_write(phydev, MII_VSC82X4_EXT_PAGE_ACCESS,
-                MII_VSC8574_EXT_MAIN);
-
-		/* write Reg29, select LED mode value=0x800a */
-		err &= phy_write(phydev, 29,
-						0x800a);
-		/* write Reg30, select LED behavior value=0x040f */
-		err &= phy_write(phydev, 30,
-						0x040f);
-    }
 	return err;
 }
 
@@ -330,10 +465,10 @@ static struct phy_driver vsc82xx_driver[] = {
 }, {
 	.phy_id         = PHY_ID_VSC8574,
 	.name           = "Vitesse VSC8574",
-	.phy_id_mask    = 0x000f0000,
+	.phy_id_mask    = 0x000ffff0,
 	.features       = PHY_GBIT_FEATURES,
 	.flags          = PHY_HAS_INTERRUPT,
-	.config_init    = &vsc824x_config_init,
+	.config_init    = &vsc8574_config_init,
 	.config_aneg    = &vsc82x4_config_aneg,
 	.read_status    = &genphy_read_status,
 	.ack_interrupt  = &vsc824x_ack_interrupt,
@@ -379,8 +514,32 @@ static struct phy_driver vsc82xx_driver[] = {
 	.driver		= { .owner = THIS_MODULE,},
 } };
 
+static int vsc8574_reva_phy_fixup(struct phy_device *phydev)
+{
+	int err = 0;
+	// printk(KERN_ERR "Hongbo: enter in vsc8574_reva_phy_fixup\n");
+	printk(KERN_ERR "MeshSr: vsc8574 rev.a phy fixup\n");
+
+	err |= vsc8574_led_mode(phydev);
+	err |= vsc8574_reva_tune(phydev);
+	return err;
+}
+
+static int vsc8574_revb_phy_fixup(struct phy_device *phydev)
+{
+	int err = 0;
+	// printk(KERN_ERR "Hongbo: enter in vsc8574_revb_phy_fixup\n");
+	printk(KERN_ERR "MeshSr: vsc8574 rev.b phy fixup\n");
+
+	err |= vsc8574_led_mode(phydev);
+	return err;
+}
+
 static int __init vsc82xx_init(void)
 {
+	phy_register_fixup_for_uid(PHY_ID_VSC8574_REV_A, PHY_ID_VSC8574_MASK, vsc8574_reva_phy_fixup);
+	phy_register_fixup_for_uid(PHY_ID_VSC8574_REV_B, PHY_ID_VSC8574_MASK, vsc8574_revb_phy_fixup);
+
 	return phy_drivers_register(vsc82xx_driver,
 		ARRAY_SIZE(vsc82xx_driver));
 }
@@ -398,7 +557,7 @@ static struct mdio_device_id __maybe_unused vitesse_tbl[] = {
 	{ PHY_ID_VSC8234, 0x000ffff0 },
 	{ PHY_ID_VSC8244, 0x000fffc0 },
 	{ PHY_ID_VSC8514, 0x000ffff0 },
-	{ PHY_ID_VSC8574, 0x000f0000 },
+	{ PHY_ID_VSC8574, 0x000ffff0 },
 	{ PHY_ID_VSC8662, 0x000ffff0 },
 	{ PHY_ID_VSC8221, 0x000ffff0 },
 	{ PHY_ID_VSC8211, 0x000ffff0 },
